@@ -6,7 +6,7 @@ import {
   SendToAddressResponse,
 } from "./module";
 
-//'http://admin1:123@localhost:18881'
+//'http://admin1:123@localhost:18884'
 var client = new JSONRPCClient(function (jsonRPCRequest) {
   return fetch("http://admin1:123@localhost:18884", {
     method: "POST",
@@ -14,14 +14,15 @@ var client = new JSONRPCClient(function (jsonRPCRequest) {
       "content-type": "application/json",
     },
     body: JSON.stringify(jsonRPCRequest),
-  }).then(function (response) {
+  }).then(async function (response) {
     if (response.status === 200) {
       // Use client.receive when you received a JSON-RPC response.
       return response.json().then(function (jsonRPCResponse) {
         return client.receive(jsonRPCResponse);
       });
     } else if (jsonRPCRequest.id !== undefined) {
-      return Promise.reject(new Error(response.statusText));
+      let error = await response.json();
+      return Promise.reject(new Error(JSON.stringify(error)));
     }
   });
 });

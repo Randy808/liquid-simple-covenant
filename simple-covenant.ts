@@ -24,14 +24,9 @@ let privateKeyBuffer = Buffer.from(
 );
 let keypair = ECPair.fromPrivateKey(privateKeyBuffer);
 
-const { address } = liquidjs.payments.p2wpkh({
-  network: regtest,
-  pubkey: keypair.publicKey,
-});
-
 async function spendToCovenant(
   assetId,
-  testAddress,
+  keypairAddress,
   lbtcTxIdSource,
   lbtcIndex,
   assetTxId,
@@ -60,7 +55,7 @@ async function spendToCovenant(
 
   const p2trAddress = liquidjs.address.fromOutputScript(output, regtest);
 
-  let assetUtxo0 = liquidjs.address.toOutputScript(testAddress);
+  let assetUtxo0 = liquidjs.address.toOutputScript(keypairAddress);
 
   const nonce = Buffer.from("00", "hex");
 
@@ -74,7 +69,7 @@ async function spendToCovenant(
     Buffer.from(LBTC_ASSET_ID, "hex").reverse(),
   ]);
 
-  let lbtcScript = liquidjs.address.toOutputScript(testAddress);
+  let lbtcScript = liquidjs.address.toOutputScript(keypairAddress);
 
   let pset = new liquidjs.Psbt({ network: regtest });
   pset
@@ -117,7 +112,7 @@ async function spendToCovenant(
       value: liquidjs.confidential.satoshiToConfidentialValue(
         amountWithPrecisionToSatoshis(lbtcAmount) - 500
       ),
-      address: address,
+      address: keypairAddress,
       nonce,
     })
     //fee
@@ -140,7 +135,7 @@ async function spendToCovenant(
 
 async function spendFromCovenant(
   assetId,
-  testAddress,
+  keypairAddress,
   assetScriptPubKey,
   lbtcTxIdSource,
   lbtcIndex,
@@ -197,7 +192,7 @@ async function spendFromCovenant(
     Buffer.from(LBTC_ASSET_ID, "hex").reverse(),
   ]);
 
-  let lbtcScript = liquidjs.address.toOutputScript(testAddress);
+  let lbtcScript = liquidjs.address.toOutputScript(keypairAddress);
   let pset = new liquidjs.Psbt({ network: regtest });
   pset
     .addInput({
@@ -234,7 +229,7 @@ async function spendFromCovenant(
     .addOutput({
       asset: lbtcBuffer,
       value: liquidjs.confidential.satoshiToConfidentialValue(lbtcAmount - 500),
-      address: address,
+      address: keypairAddress,
       nonce,
     })
     .addOutput({
@@ -290,16 +285,20 @@ async function run() {
   /************************/
 
   console.log("Sending new asset to test address...");
-  const lbtcAmount = 10;
-  const testAddress = "ert1qrpxstycc2desapdg3xzcd6vmgmzym749s577v7";
+  const lbtcAmount = .0001;
+
+  const { address: keypairAddress } = liquidjs.payments.p2wpkh({
+    network: regtest,
+    pubkey: keypair.publicKey,
+  });
 
   let sendAssetTxId = await elementsClient.sendToAddress(
-    testAddress,
+    keypairAddress,
     amount,
     issueAssetResponse.asset
   );
   await elementsClient.sendToAddress(
-    testAddress,
+    keypairAddress,
     reissuanceTokenAmount,
     issueAssetResponse.token
   );
@@ -310,20 +309,22 @@ async function run() {
   /************************/
 
   console.log("Sending LBTC to test address...");
-  let testAddressLbtcFundingTxId = await elementsClient.sendToAddress(
-    testAddress,
+  let lbtcFundingTxId = await elementsClient.sendToAddress(
+    keypairAddress,
     lbtcAmount
   );
-  console.log(`sendToAddress (BTC) result: ${testAddressLbtcFundingTxId}\n\n`);
+  console.log(`sendToAddress (BTC) result: ${lbtcFundingTxId}\n\n`);
 
   /************************/
 
   console.log("Determining which output index holds LBTC...");
-  let testAddressLbtcFundingTransaction =
-    await elementsClient.getRawTransaction(testAddressLbtcFundingTxId, true);
+  let lbtcFundingTransaction = await elementsClient.getRawTransaction(
+    lbtcFundingTxId,
+    true
+  );
 
   let lbtcFaucetVout = getOutputForAssetId(
-    testAddressLbtcFundingTransaction,
+    lbtcFundingTransaction,
     LBTC_ASSET_ID
   );
 
@@ -332,11 +333,13 @@ async function run() {
   console.log(
     `Determining which output index holds ${issueAssetResponse.asset}...`
   );
-  let testAddressAssetFundingTransaction =
-    await elementsClient.getRawTransaction(sendAssetTxId, true);
+  let assetFundingTransaction = await elementsClient.getRawTransaction(
+    sendAssetTxId,
+    true
+  );
 
   let assetFaucetVout = getOutputForAssetId(
-    testAddressAssetFundingTransaction,
+    assetFundingTransaction,
     issueAssetResponse.asset
   );
 
@@ -346,8 +349,8 @@ async function run() {
 
   let resp = await spendToCovenant(
     issueAssetResponse.asset,
-    testAddress,
-    testAddressLbtcFundingTxId,
+    keypairAddress,
+    lbtcFundingTxId,
     lbtcFaucetVout,
     sendAssetTxId,
     assetFaucetVout,
@@ -377,13 +380,14 @@ async function run() {
 
   let spendFromCovenantTx = await spendFromCovenant(
     issueAssetResponse.asset,
-    testAddress,
+    keypairAddress,
     spendToCovenantTx.vout[assetVout].scriptPubKey.hex,
     resp,
     lbtcVout,
     resp,
     assetVout,
-    999999500,
+    // '- 500' because 500 was taken as fee in 'spendToCovenant'
+    amountWithPrecisionToSatoshis(lbtcAmount) - 500,
     10,
     elementsClient.getRawClient()
   );
